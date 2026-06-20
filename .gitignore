@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Sessions
+.visions/
+
+# Noise files not part of the CLI
+Desktop/
+loja-visionsx/
+src/
+App.jsx
+index.html
+processes.txt
+system_info.txt
+
+# OS
+.DS_Store
+Thumbs.db
