@@ -234,6 +234,9 @@ def web_search(query: str, max_results: int = 5) -> str:
 
     Dica: para focar uma fonte use 'site:' na query, ex:
       'site:github.com fastapi auth', 'site:stackoverflow.com pandas merge'.
+    
+    IMPORTANTE: Esta função retorna APENAS snippets (título + resumo curto).
+    Para obter informação completa, use fetch_url(url) em cada resultado relevante.
     """
     max_results = int(max_results) if str(max_results).isdigit() else 5
     results: list[tuple] = []
@@ -255,6 +258,11 @@ def web_search(query: str, max_results: int = 5) -> str:
     out = []
     for i, (title, url, snippet) in enumerate(results, 1):
         out.append(f"{i}. {title or '(sem título)'}\n   {snippet}\n   {url}")
+    
+    # Adiciona instrução explícita para ler o conteúdo completo
+    out.append("\n⚠️ IMPORTANTE: Os resultados acima são APENAS snippets. "
+               "Para obter informação detalhada, use fetch_url(url) em cada link relevante.")
+    
     return "\n\n".join(out)
 
 
@@ -269,7 +277,18 @@ def _html_to_text(raw: str) -> str:
 
 
 def fetch_url(url: str, max_chars: int = 8000) -> str:
-    """Download a web page and return its readable text content."""
+    """Download a web page and return its readable text content.
+    
+    ESTA É A FERRAMENTA PRINCIPAL para ler conteúdo detalhado da web.
+    Use SEMPRE após web_search para obter informação completa (não apenas snippets).
+    
+    FLUXO RECOMENDADO:
+    1. web_search(query) → obtém lista de URLs relevantes
+    2. fetch_url(url1), fetch_url(url2), fetch_url(url3) → lê conteúdo completo de cada
+    3. Sintetiza resposta baseada no conteúdo LIDO
+    
+    Se falhar em uma URL, tente a próxima automaticamente.
+    """
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
     try:

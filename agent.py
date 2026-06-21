@@ -192,7 +192,7 @@ tools_schema = [
     ),
     _fn(
         "web_search",
-        "Search the web for recent information. Tip: use 'site:' to target a source, e.g. 'site:github.com ...', 'site:stackoverflow.com ...', 'site:developer.mozilla.org ...'.",
+        "Search the web for snippets (titles + short summaries). RETURNS ONLY SNIPPETS - NOT FULL CONTENT! For detailed info, you MUST call fetch_url(url) on each result. Tip: use 'site:' to target sources.",
         {
             "query":       {"type": "string", "description": "The search query."},
             "max_results": {"type": "integer", "description": "Max results (default 5)."},
@@ -201,7 +201,7 @@ tools_schema = [
     ),
     _fn(
         "fetch_url",
-        "Download a web page and return its readable text. Use after web_search to read a result in full, or to read docs/articles directly.",
+        "MAIN TOOL for reading web content. ALWAYS use this AFTER web_search to get full article/tutorial/documentation text. web_search only gives snippets - fetch_url gives complete content. Call this multiple times for different URLs.",
         {
             "url":       {"type": "string", "description": "The URL to fetch."},
             "max_chars": {"type": "integer", "description": "Max characters to return (default 8000)."},
