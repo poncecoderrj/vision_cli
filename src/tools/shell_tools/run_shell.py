@@ -3,12 +3,13 @@ Shell Tools - Execução de comandos shell com qualidade máxima
 
 Features:
 - Terminal interativo (Ctrl+R entra, Ctrl+C mata processo não o agente)
-- Streaming em tempo real da saída
+- Streaming em tempo real com select() eficiente
 - Timeout configurável
 - Detecção automática de processos em loop (servidores)
 - Whitelist de comandos perigosos
 - Histórico de comandos executados
 - Suporte a PowerShell, CMD e bash
+- Painel de terminal dedicado com foco granular
 """
 
 import os
@@ -17,9 +18,17 @@ import signal
 import subprocess
 import threading
 import time
-from typing import Optional, Generator, Dict, Any
+import select
+from typing import Optional, Generator, Dict, Any, List, Callable
 from pathlib import Path
 import platform
+
+# Importar TerminalPanel para integração
+try:
+    from ...ui.components.terminal_panel import TerminalPanel, get_terminal_panel
+    HAS_TERMINAL_PANEL = True
+except ImportError:
+    HAS_TERMINAL_PANEL = False
 
 
 class ShellExecutionResult:
@@ -272,6 +281,93 @@ EXEMPLOS DE USO:
         
         return ''.join(stdout_lines), ''.join(stderr_lines)
     
+    def execute_with_terminal_panel(
+        self,
+        command: str,
+        cwd: Optional[str] = None,
+        shell: Optional[str] = None,
+        stream_callback: Optional[Callable[[str, bool], None]] = None
+    ) -> Generator[Dict[str, Any], None, ShellExecutionResult]:
+        """
+        Executa comando usando TerminalPanel para exibição dedicada
+        
+        Features:
+        - Painel visual com bordas e título
+        - Streaming eficiente com select()
+        - Foco granular (Shift+C cancela processo específico)
+        - Múltiplos terminais simultâneos
+        
+        Yields:
+            Dict com status, output e informações do terminal
+        """
+        if not HAS_TERMINAL_PANEL:
+            # Fallback para execução normal
+            yield from self.execute(command, cwd, 0, False, shell, stream_callback)
+            return
+        
+        start_time = time.time()
+        console = Console()
+        panel = get_terminal_panel(console)
+        
+        # Determinar shell
+        if shell is None:
+            shell_cmd = self._detect_shell()
+        else:
+            shell_cmd = shell
+        
+        shell_path = {
+            "powershell": "powershell.exe",
+            "cmd": "cmd.exe",
+            "bash": "/bin/bash"
+        }.get(shell_cmd, "/bin/bash")
+        
+        # Spawn processo no terminal panel
+        session = panel.spawn(command, cwd=cwd, shell=shell_path)
+        
+        yield {
+            "type": "terminal_started",
+            "session_id": session.session_id,
+            "pid": session.process.pid,
+            "message": f"🖥️ Terminal iniciado: {command}",
+            "hint": "💡 Shift+C cancela este terminal · Escape fecha"
+        }
+        
+        # Stream com select() eficiente
+        try:
+            for line in panel.stream(session, callback=stream_callback):
+                yield {
+                    "type": "output",
+                    "data": line,
+                    "session_id": session.session_id
+                }
+        except Exception as e:
+            yield {
+                "type": "error",
+                "message": f"Erro no terminal: {str(e)}"
+            }
+        
+        # Finalizar
+        duration = time.time() - start_time
+        
+        result = ShellExecutionResult(
+            command=command,
+            exit_code=session.process.returncode or 0,
+            stdout='\n'.join(session.output_lines),
+            stderr="",
+            duration=duration,
+            is_interactive=True,
+            process_id=session.process.pid
+        )
+        
+        yield {
+            "type": "terminal_finished",
+            "session_id": session.session_id,
+            "exit_code": result.exit_code,
+            "duration": duration
+        }
+        
+        return result
+    
     def execute_interactive(
         self,
         command: str,
@@ -287,8 +383,6 @@ EXEMPLOS DE USO:
         Yields:
             Dict com status e output parcial
         """
-        import select
-        
         start_time = time.time()
         shell_cmd = self._get_shell_command(shell)
         working_dir = cwd or os.getcwd()
@@ -483,20 +577,18 @@ EXEMPLOS DE USO:
                 stream_callback(yield_msg, True)
         
         if interactive or is_server:
-            # Usar modo interativo
-            yield {
-                "type": "info",
-                "message": f"🔄 Detectado comando de servidor/processo em loop"
-            }
-            
-            # Generator para modo interativo
-            result_gen = self.execute_interactive(command, working_dir, shell)
+            # Usar TerminalPanel para melhor experiência visual
+            if HAS_TERMINAL_PANEL:
+                result_gen = self.execute_with_terminal_panel(command, working_dir, shell, stream_callback)
+            else:
+                # Fallback para modo interativo tradicional
+                result_gen = self.execute_interactive(command, working_dir, shell)
             
             last_result = None
             for item in result_gen:
                 if stream_callback:
                     if item["type"] == "output":
-                        stream_callback(item["data"], item["stream"] == "stderr")
+                        stream_callback(item.get("data", ""), False)
                     elif item["type"] == "info":
                         stream_callback(item["message"], False)
                 last_result = item
