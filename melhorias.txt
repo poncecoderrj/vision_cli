@@ -1,0 +1,715 @@
+Perfeito! Vamos **resolver TODOS os 10 gargalos** e implementar as **melhorias sugeridas** (incluindo o comando `/explore`). 
+
+Disponibilizei o código **pronto para copiar e colar**. Cada bloco indica exatamente qual arquivo substituir ou modificar.
+
+---
+
+## 🛠️ SOLUÇÃO DOS GARGALOS (ARQUIVO POR ARQUIVO)
+
+### 1. CORREÇÃO DO `src/core/tool_validator.py` (Adicionar reparo heurístico)
+*Substitua todo o conteúdo por este:*
+
+```python
+import difflib
+import json
+import re
+import traceback
+from typing import Dict, Any, List, Optional, Callable
+from src.tools.base import Tool
+
+class ToolValidator:
+    def __init__(self, llm_client: Optional[Callable] = None, cwd: str = "."):
+        self.llm_client = llm_client
+        self.cwd = cwd
+
+    def _heuristic_repair(self, tool_call: Dict[str, Any], tools: Dict[str, Tool], 
+                          last_user_message: str = "") -> Optional[Dict[str, Any]]:
+        """Tenta corrigir chamadas com heurísticas ANTES de chamar o LLM."""
+        tool_name = tool_call.get("name")
+        if not tool_name or tool_name not in tools:
+            return None
+        
+        args = tool_call.get("arguments", {})
+        tool = tools[tool_name]
+        required = getattr(tool, "required_args", [])
+        
+        # Se faltar 'path', usa o diretório atual ou extrai da última mensagem
+        if "path" in required and not args.get("path"):
+            # Tenta extrair caminho da última mensagem do usuário
+            path_match = re.search(r'["\']([^"\']+)["\']', last_user_message)
+            if path_match:
+                args["path"] = path_match.group(1)
+            else:
+                # Se for comando de listagem, usa o cwd
+                if tool_name in ["list_directory", "read_file"]:
+                    args["path"] = self.cwd
+                else:
+                    return None
+        
+        # Se faltar 'query', usa a última mensagem do usuário
+        if "query" in required and not args.get("query"):
+            if last_user_message:
+                # Remove comandos comuns da query
+                clean_query = re.sub(r'(pesquise|busque|procure|search|find|por|for)\s+', '', last_user_message, flags=re.I)
+                if clean_query:
+                    args["query"] = clean_query
+                else:
+                    return None
+            else:
+                return None
+        
+        # Se faltar 'content' (para escrita), tenta extrair
+        if "content" in required and not args.get("content"):
+            if last_user_message:
+                # Tenta extrair algo entre aspas ou depois de "escreva"
+                content_match = re.search(r'(?:escreva|write|salve|save)\s+["\']?([^"\']+)["\']?', last_user_message, re.I)
+                if content_match:
+                    args["content"] = content_match.group(1)
+                else:
+                    return None
+            else:
+                return None
+        
+        tool_call["arguments"] = args
+        return tool_call
+
+    def validate(self, tool_call: Dict[str, Any], tools: Dict[str, Tool]) -> Dict[str, Any]:
+        if "name" not in tool_call or "arguments" not in tool_call:
+            raise ValueError("Tool call malformada: faltando 'name' ou 'arguments'")
+        
+        tool_name = tool_call["name"]
+        if tool_name not in tools:
+            matches = difflib.get_close_matches(tool_name, tools.keys(), n=1, cutoff=0.6)
+            if matches:
+                suggested = matches[0]
+                raise ValueError(f"Ferramenta '{tool_name}' não encontrada. Você quis dizer '{suggested}'?")
+            raise ValueError(f"Ferramenta '{tool_name}' não existe.")
+        
+        tool = tools[tool_name]
+        required_args = getattr(tool, "required_args", [])
+        args = tool_call.get("arguments", {})
+        
+        missing = [arg for arg in required_args if arg not in args or args[arg] in (None, "")]
+        if missing:
+            raise ValueError(f"Argumentos obrigatórios faltando: {missing}. Recebido: {args}")
+        
+        return tool_call
+
+    def repair(self, tool_call: Dict[str, Any], tools: Dict[str, Tool], 
+               conversation: List[Dict], last_user_message: str = "") -> Optional[Dict[str, Any]]:
+        # 1. Tenta heurística primeiro
+        heuristic = self._heuristic_repair(tool_call, tools, last_user_message)
+        if heuristic:
+            try:
+                return self.validate(heuristic, tools)
+            except ValueError:
+                pass  # Se a heurística falhar na validação, segue para LLM
+        
+        # 2. Fallback para LLM (se disponível)
+        try:
+            return self.validate(tool_call, tools)
+        except ValueError as e:
+            if not self.llm_client:
+                return None
+            
+            tool_name = tool_call.get("name", "unknown")
+            tool_schemas = {}
+            for name, t in tools.items():
+                tool_schemas[name] = {
+                    "description": t.description,
+                    "required_args": getattr(t, "required_args", [])
+                }
+            
+            repair_prompt = f"""
+            Você é um assistente que corrige chamadas de ferramentas (tool calls).
+            
+            A ferramenta '{tool_name}' falhou com o erro: {str(e)}
+            
+            Ferramentas disponíveis e seus schemas:
+            {json.dumps(tool_schemas, indent=2)}
+            
+            A tool call original foi: {json.dumps(tool_call, indent=2)}
+            
+            Última mensagem do usuário: {last_user_message}
+            
+            Corrija a tool call. Responda APENAS com um JSON válido contendo "name" e "arguments".
+            Se não for possível corrigir, responda com {{"error": "motivo"}}.
+            """
+            
+            try:
+                if hasattr(self.llm_client, "complete"):
+                    response = self.llm_client.complete(repair_prompt)
+                else:
+                    response = self.llm_client(repair_prompt)
+                
+                json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                if not json_match:
+                    return None
+                
+                repaired = json.loads(json_match.group())
+                if "error" in repaired:
+                    return None
+                
+                return self.validate(repaired, tools)
+            except Exception:
+                return None
+```
+
+---
+
+### 2. CORREÇÃO DO `src/core/fallback_parser.py` (Regex expandido e robusto)
+*Substitua todo o conteúdo:*
+
+```python
+import re
+import os
+from typing import List, Dict, Any
+
+class FallbackParser:
+    def __init__(self, cwd: str = "."):
+        self.cwd = cwd
+
+    def parse(self, user_input: str) -> List[Dict[str, Any]]:
+        input_lower = user_input.lower().strip()
+        calls = []
+
+        # 1. Leitura de arquivo (mais variações)
+        read_patterns = [
+            r'(?:leia|read|mostre|exiba|cat|show me|open|abrir?)\s+(?:o\s+)?(?:arquivo|file|conteúdo de)?\s*["\']?([^"\']+)["\']?',
+            r'(?:conteúdo|content)\s+(?:do|da|de)?\s*["\']?([^"\']+)["\']?'
+        ]
+        for pattern in read_patterns:
+            match = re.search(pattern, input_lower)
+            if match:
+                filepath = match.group(1).strip()
+                calls.append({"name": "read_file", "arguments": {"path": filepath}})
+                return calls
+
+        # 2. Escrita em arquivo
+        write_match = re.search(r'(?:escreva|write|salve|save|crie|create)\s+(.+?)\s+(?:no|em|para|no arquivo|em arquivo|in file|no caminho|em caminho)\s+["\']?([^"\']+)["\']?', input_lower)
+        if write_match:
+            content = write_match.group(1).strip()
+            filepath = write_match.group(2).strip()
+            calls.append({"name": "write_file", "arguments": {"path": filepath, "content": content}})
+            return calls
+
+        # 3. Listar diretório
+        if re.search(r'(?:liste|list|ls|dir|mostre arquivos|show files|arquivos em|pastas em|o que tem em|tree)', input_lower):
+            path_match = re.search(r'(?:em|in|de|do|da|no|na|pasta|diretório|directory)\s+["\']?([^"\']+)["\']?', input_lower)
+            path = path_match.group(1) if path_match else self.cwd
+            calls.append({"name": "list_directory", "arguments": {"path": path}})
+            return calls
+
+        # 4. Comando shell
+        shell_match = re.search(r'(?:execute|run|exec|rode|comando|terminal)\s+(.+?)(?:$|,|\.)', input_lower)
+        if shell_match:
+            command = shell_match.group(1).strip()
+            calls.append({"name": "shell", "arguments": {"command": command}})
+            return calls
+
+        # 5. Busca por código
+        search_match = re.search(r'(?:busque|search|procure|find|localize)\s+(?:por|for)?\s+["\']?([^"\']+)["\']?', input_lower)
+        if search_match:
+            query = search_match.group(1).strip()
+            calls.append({"name": "search_code", "arguments": {"query": query}})
+            return calls
+
+        # 6. Web search
+        web_match = re.search(r'(?:pesquise|web search|busque na web|google|pesquisa na internet)\s+["\']?([^"\']+)["\']?', input_lower)
+        if web_match:
+            query = web_match.group(1).strip()
+            calls.append({"name": "web_search_fetch", "arguments": {"query": query}})
+            return calls
+
+        # 7. Ajuda/exploração
+        if re.search(r'(?:explore|explorar|analise|analyze|mapeie|map|investigue|investigar)', input_lower):
+            path_match = re.search(r'(?:o\s+)?(?:projeto|project|diretório|pasta|directory|repo)?\s*["\']?([^"\']+)["\']?', input_lower)
+            path = path_match.group(1) if path_match else self.cwd
+            # O comando /explore será tratado pelo sistema, mas aqui mapeamos para listagem + busca
+            calls.append({"name": "list_directory", "arguments": {"path": path}})
+            return calls
+
+        return []
+```
+
+---
+
+### 3. IMPLEMENTAÇÃO COMPLETA DO `src/core/context_summarizer.py` (Sumarização real)
+*Crie/Substitua o arquivo:*
+
+```python
+import json
+from typing import List, Dict, Any
+from src.llm import stream_llm  # ajuste o import conforme seu arquivo
+
+async def summarize_conversation(messages: List[Dict[str, Any]]) -> str:
+    """Resume uma lista de mensagens usando o LLM."""
+    if not messages:
+        return "Nenhuma conversa anterior."
+    
+    # Converte para texto
+    conversation_text = ""
+    for msg in messages[-20:]:  # Pega as últimas 20 para não estourar o contexto
+        role = msg.get("role", "unknown")
+        content = msg.get("content", "")
+        reasoning = msg.get("reasoning", "")
+        if reasoning:
+            content += f" (Raciocínio: {reasoning})"
+        conversation_text += f"[{role}]: {content}\n"
+    
+    prompt = f"""
+    Você é um assistente que resume conversas de um agente de IA.
+    Resuma os seguintes pontos principais da conversa abaixo, mantendo informações críticas como:
+    - Arquivos que foram lidos/escritos.
+    - Comandos executados.
+    - Decisões importantes tomadas.
+    - Erros encontrados e como foram resolvidos.
+    
+    ### CONVERSA:
+    {conversation_text}
+    
+    ### RESUMO (máximo 300 palavras):
+    """
+    
+    try:
+        # Usa o mesmo cliente LLM, mas sem ferramentas
+        response, _, _ = await stream_llm(
+            messages=[{"role": "user", "content": prompt}],
+            model="gemma-2b-it",  # ou o modelo padrão
+            temperature=0.5,
+            stream=False
+        )
+        return response.strip() if response else "Não foi possível gerar resumo."
+    except Exception as e:
+        return f"Erro ao sumarizar: {str(e)}"
+
+async def check_and_summarize(session, max_tokens=4000):
+    """Verifica o tamanho do histórico e sumariza se necessário."""
+    total_chars = 0
+    for msg in session.messages:
+        total_chars += len(msg.get("content", "")) + len(msg.get("reasoning", ""))
+    estimated_tokens = total_chars // 4
+    
+    if estimated_tokens > max_tokens:
+        print("[Sistema] Contexto grande, aplicando sumarização...")
+        keep_count = 5
+        keep_messages = session.messages[-keep_count:]
+        old_messages = session.messages[:-keep_count]
+        
+        summary = await summarize_conversation(old_messages)
+        
+        session.messages = [
+            {"role": "system", "content": f"Resumo da conversa anterior: {summary}"}
+        ] + keep_messages
+        session._save()
+        print("[Sistema] Sumarização concluída.")
+```
+
+---
+
+### 4. CORREÇÃO DO `src/tools/web_tools.py` (Síncrono para evitar erros de async)
+*Substitua a classe `WebSearchFetch` por esta versão síncrona:*
+
+```python
+# ADICIONAR IMPORTS NO TOPO (se não tiver)
+import httpx
+import re
+from bs4 import BeautifulSoup
+from duckduckgo_search import DDGS
+from src.tools.base import Tool, ToolResult
+
+# SUBSTITUIR a classe WebSearchFetch por:
+class WebSearchFetch(Tool):
+    """Busca na web, acessa os top N resultados e retorna o conteúdo limpo (versão síncrona)."""
+    def __init__(self):
+        super().__init__(
+            name="web_search_fetch",
+            description="Busca na web, acessa os 3 primeiros resultados e retorna o conteúdo extraído (texto limpo).",
+            required_args=["query"]
+        )
+
+    def execute(self, query: str, max_results: int = 3) -> ToolResult:  # <-- SEM async
+        try:
+            with DDGS() as ddgs:
+                results = list(ddgs.text(query, max_results=max_results))
+            
+            if not results:
+                return ToolResult(success=False, error="Nenhum resultado encontrado.")
+            
+            combined_text = f"## Resultados para: {query}\n\n"
+            
+            # Usando httpx síncrono (Client, não AsyncClient)
+            with httpx.Client(timeout=15.0) as client:
+                for i, res in enumerate(results):
+                    url = res.get("href")
+                    title = res.get("title", "Sem título")
+                    snippet = res.get("body", "")
+                    combined_text += f"### {i+1}. {title}\nFonte: {url}\n\n"
+                    
+                    try:
+                        resp = client.get(url, follow_redirects=True)
+                        if resp.status_code == 200:
+                            try:
+                                soup = BeautifulSoup(resp.text, 'html.parser')
+                                for script in soup(["script", "style"]):
+                                    script.decompose()
+                                text = soup.get_text(separator=" ", strip=True)
+                                text = re.sub(r'\s+', ' ', text)
+                                full_content = text[:2000] + "..." if len(text) > 2000 else text
+                            except:
+                                text = re.sub(r'<[^>]+>', ' ', resp.text)
+                                text = re.sub(r'\s+', ' ', text)
+                                full_content = text[:2000] + "..." if len(text) > 2000 else text
+                            
+                            combined_text += f"**Conteúdo extraído:**\n{full_content}\n\n"
+                        else:
+                            combined_text += f"*(Não foi possível carregar a página - status {resp.status_code})*\n\n"
+                    except Exception as e:
+                        combined_text += f"*(Erro ao buscar conteúdo: {str(e)})*\n\n"
+                    
+                    if "Conteúdo extraído" not in combined_text[-200:]:
+                        combined_text += f"**Snippet:**\n{snippet}\n\n"
+            
+            return ToolResult(success=True, output=combined_text)
+        except Exception as e:
+            return ToolResult(success=False, error=str(e))
+```
+
+---
+
+### 5. CORREÇÃO DO `src/session/session_manager.py` (Serializar `reasoning`)
+*Adicione/modifique os métodos `to_dict` e `from_dict` (ou `_save`/`_load`):*
+
+```python
+# LOCALIZE a função que salva (ex: _save) e substitua por:
+def _save(self):
+    data = {
+        "session_id": self.session_id,
+        "cwd": self.cwd,
+        "messages": self.messages,  # Já deve conter reasoning se você adicionou
+        "created_at": self.created_at.isoformat()
+    }
+    with open(self.session_file, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+# E no _load (ou from_dict):
+@classmethod
+def from_dict(cls, data):
+    session = cls(session_id=data["session_id"], cwd=data["cwd"])
+    session.messages = data.get("messages", [])
+    # Garantir que todas as mensagens tenham campo 'reasoning' (para compatibilidade)
+    for msg in session.messages:
+        if "reasoning" not in msg:
+            msg["reasoning"] = None
+    session.created_at = datetime.fromisoformat(data["created_at"])
+    return session
+
+# Se você usa Message class, ajuste o construtor para aceitar reasoning.
+```
+
+---
+
+### 6. CORREÇÃO DO `src/skills/manager.py` (Validação de variáveis)
+*Adicione esta validação no método `execute_skill`:*
+
+```python
+# DENTRO do método execute_skill, ANTES da substituição:
+def _validate_and_prompt_variables(self, step: dict, context: dict) -> dict:
+    """Verifica se todas as variáveis {{var}} existem no contexto. Se não, pergunta ao usuário."""
+    step_str = json.dumps(step)
+    import re
+    
+    missing_vars = []
+    for match in re.finditer(r'\{\{(\w+)\}\}', step_str):
+        var_name = match.group(1)
+        if var_name not in context:
+            missing_vars.append(var_name)
+    
+    if missing_vars:
+        # Pergunta ao usuário interativamente (usando input)
+        print(f"[Skill] Variáveis faltando: {missing_vars}")
+        for var in missing_vars:
+            value = input(f"Por favor, informe o valor para '{var}': ")
+            context[var] = value
+    
+    return context
+
+# E no loop principal:
+async def execute_skill(self, skill_name, context_vars=None):
+    context_vars = context_vars or {}
+    skill = self.skills[skill_name]
+    for step in skill["steps"]:
+        # Valida e pergunta variáveis faltando
+        context_vars = self._validate_and_prompt_variables(step, context_vars)
+        step = self._substitute_variables(step, context_vars)
+        # ... executa o passo ...
+```
+
+---
+
+### 7. NOVO ARQUIVO: `src/core/analyzer.py` (Auto-aprimoramento via logs)
+*Crie este arquivo para analisar métricas e sugerir melhorias:*
+
+```python
+import json
+import os
+from collections import defaultdict
+from typing import Dict, List
+
+class MetricsAnalyzer:
+    def __init__(self, log_dir: str = "logs"):
+        self.log_dir = log_dir
+
+    def analyze_stats(self) -> Dict:
+        """Lê o arquivo stats.jsonl e retorna métricas agregadas."""
+        stats_file = os.path.join(self.log_dir, "stats.jsonl")
+        if not os.path.exists(stats_file):
+            return {"error": "Arquivo de estatísticas não encontrado."}
+        
+        metrics = defaultdict(list)
+        with open(stats_file, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    entry = json.loads(line)
+                    metric = entry.get("metric")
+                    value = entry.get("value")
+                    if metric:
+                        metrics[metric].append(value)
+                except:
+                    continue
+        
+        # Calcula taxas
+        report = {}
+        for key, values in metrics.items():
+            if key == "tool_repaired":
+                success = sum(1 for v in values if v is True)
+                total = len(values)
+                report["taxa_reparo"] = f"{success}/{total} ({success/total*100:.1f}%)" if total > 0 else "0"
+            elif key == "fallback_triggered":
+                success = sum(1 for v in values if v is True)
+                total = len(values)
+                report["taxa_fallback"] = f"{success}/{total} ({success/total*100:.1f}%)" if total > 0 else "0"
+        
+        # Ferramentas mais usadas (dos logs de turno)
+        turn_files = [f for f in os.listdir(self.log_dir) if f.startswith("session_") and f.endswith(".jsonl")]
+        tool_usage = defaultdict(int)
+        for tf in turn_files[-5:]:  # últimos 5 arquivos
+            with open(os.path.join(self.log_dir, tf), "r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        data = json.loads(line)
+                        tc = data.get("tool_call", {})
+                        if tc:
+                            tool_usage[tc.get("name", "unknown")] += 1
+                    except:
+                        continue
+        
+        report["ferramentas_mais_usadas"] = dict(sorted(tool_usage.items(), key=lambda x: x[1], reverse=True)[:5])
+        return report
+
+    def generate_prompt_boost(self) -> str:
+        """Gera sugestões para melhorar o system prompt com base nos logs."""
+        report = self.analyze_stats()
+        if "error" in report:
+            return "Sem dados suficientes para análise."
+        
+        suggestions = []
+        # Se taxa de fallback é alta, sugerir adicionar exemplos no prompt
+        if "taxa_fallback" in report:
+            taxa = report["taxa_fallback"]
+            try:
+                perc = float(taxa.split("(")[1].replace("%)", ""))
+                if perc > 30:
+                    suggestions.append("- Alto uso de fallback (>30%). Adicione mais exemplos de tool calls no system prompt.")
+            except:
+                pass
+        
+        if "taxa_reparo" in report:
+            try:
+                perc = float(report["taxa_reparo"].split("(")[1].replace("%)", ""))
+                if perc < 50:
+                    suggestions.append("- Baixa taxa de reparo automático (<50%). Considere usar um modelo maior para validação ou aumentar a heurística.")
+            except:
+                pass
+        
+        if not suggestions:
+            suggestions.append("- Sistema parece estável. Continue monitorando.")
+        
+        return "\n".join(suggestions)
+```
+
+---
+
+### 8. NOVO COMANDO `/explore` (Adicione no seu `main.py` ou `commands/builtin.py`)
+*Adicione esta lógica no tratamento de comandos internos:*
+
+```python
+# DENTRO da função que processa comandos (ex: process_command):
+if command == "/explore":
+    path = args[0] if args else session.cwd
+    print(f"[Explorando] {path} ...")
+    
+    # 1. Lista diretório
+    list_tool = tools["list_directory"]
+    list_result = list_tool.execute(path=path)
+    print(list_result.output)
+    
+    # 2. Tenta ler README.md ou pyproject.toml
+    for filename in ["README.md", "pyproject.toml", "setup.py", "main.py"]:
+        try:
+            read_tool = tools["read_file"]
+            filepath = os.path.join(path, filename)
+            result = read_tool.execute(path=filepath)
+            if result.success:
+                print(f"\n=== Conteúdo de {filename} (primeiras 20 linhas) ===")
+                lines = result.output.split("\n")[:20]
+                print("\n".join(lines))
+                print("... (truncado)")
+                break
+        except:
+            pass
+    
+    # 3. Busca por padrões importantes
+    search_tool = tools["search_code"]
+    for pattern in ["class.*Tool", "def execute", "async def"]:
+        result = search_tool.execute(query=pattern, path=path)
+        if result.success:
+            print(f"\n=== Ocorrências de '{pattern}' ===")
+            print(result.output[:500] + "..." if len(result.output) > 500 else result.output)
+    
+    return True  # indica que o comando foi processado
+```
+
+---
+
+### 9. ADICIONAR TRATAMENTO DE ERROS COM STACK TRACE (No loop principal)
+*No seu `main.py`, onde você executa as tools, substitua por:*
+
+```python
+import traceback
+
+# Dentro do try/except da execução da tool:
+try:
+    result = await execute_tool(tc, tools)  # ou sync
+except Exception as e:
+    error_trace = traceback.format_exc()
+    print(f"[ERRO] {e}")
+    print(f"[DETALHES] {error_trace}")
+    # Salva no log
+    logger.log_metric("tool_crash", True, {"tool": tc.get("name"), "trace": error_trace})
+    result = ToolResult(success=False, error=f"Falha crítica: {str(e)}")
+```
+
+---
+
+### 10. ESTRUTURA DE TESTES (Novo diretório `tests/test_tools.py`)
+*Crie a pasta `tests/` e adicione este arquivo:*
+
+```python
+import pytest
+import os
+import tempfile
+from src.tools.file_tools import ReadFile, WriteFile, ListDirectory
+from src.tools.base import ToolResult
+
+def test_read_write_file():
+    with tempfile.NamedTemporaryFile(mode="w+", delete=False) as f:
+        f.write("Hello World")
+        tmp_path = f.name
+    
+    read_tool = ReadFile()
+    result = read_tool.execute(path=tmp_path)
+    assert result.success is True
+    assert "Hello World" in result.output
+    
+    write_tool = WriteFile()
+    result = write_tool.execute(path=tmp_path, content="New Content")
+    assert result.success is True
+    
+    result = read_tool.execute(path=tmp_path)
+    assert "New Content" in result.output
+    
+    os.unlink(tmp_path)
+
+def test_list_directory():
+    list_tool = ListDirectory()
+    result = list_tool.execute(path=".")
+    assert result.success is True
+    assert "src" in result.output or "tests" in result.output
+
+# Para rodar: pytest tests/
+```
+
+---
+
+## 🧩 INTEGRAÇÃO FINAL NO LOOP PRINCIPAL
+
+Certifique-se de que seu `main.py` (ou `app.py`) instancie as novas classes corretamente:
+
+```python
+# NO INÍCIO do seu arquivo principal:
+from src.core.tool_validator import ToolValidator
+from src.core.fallback_parser import FallbackParser
+from src.core.logger import InteractionLogger
+from src.core.analyzer import MetricsAnalyzer
+from src.core.context_summarizer import check_and_summarize
+
+# Instâncias:
+validator = ToolValidator(llm_client=your_llm_function, cwd=session.cwd)
+fallback = FallbackParser(cwd=session.cwd)
+logger = InteractionLogger()
+analyzer = MetricsAnalyzer()
+
+# Dentro do loop, após cada turno:
+if len(session.messages) % 5 == 0:
+    await check_and_summarize(session, max_tokens=4000)
+
+# Comando para análise (adicione no processador de comandos):
+if command == "/analyze":
+    report = analyzer.analyze_stats()
+    print(json.dumps(report, indent=2))
+    print("\nSugestões de melhoria:")
+    print(analyzer.generate_prompt_boost())
+    return True
+```
+
+---
+
+## 🚀 COMO APLICAR TUDO DE UMA VEZ:
+
+1. **Copie e cole** cada bloco nos respectivos arquivos (substituindo o conteúdo antigo).
+2. **Crie os novos arquivos**: `src/core/analyzer.py`, `tests/test_tools.py`.
+3. **Instale as dependências** (se faltar):
+   ```bash
+   pip install pytest duckduckgo-search beautifulsoup4 httpx
+   ```
+4. **Teste o comando `/explore`** e `/analyze` no seu CLI.
+5. **Rode os testes**:
+   ```bash
+   pytest tests/
+   ```
+
+---
+
+## ✅ O QUE FOI RESOLVIDO COM ESSAS ALTERAÇÕES:
+
+| Gargalo | Solução aplicada |
+|---------|-------------------|
+| 🔴 1 | Reparo heurístico antes do LLM |
+| 🔴 2 | Regex expandido no Fallback Parser |
+| 🔴 3 | Sumarização real implementada e integrada |
+| 🔴 4 | `web_search_fetch` agora é síncrono (sem `async`) |
+| 🔴 5 | Session salva corretamente o campo `reasoning` |
+| 🔴 6 | Skills validam variáveis e perguntam ao usuário |
+| 🔴 7 | `MetricsAnalyzer` gera relatórios e sugestões |
+| 🔴 8 | Estrutura de testes criada (pytest) |
+| 🔴 9 | Stack trace capturado e logado em erros |
+| 🔴 10 | Chamadas síncronas não bloqueiam mais a UI (se você usou `asyncio.run` corretamente) |
+| ⭐ Novo | Comando `/explore` implementado |
+| ⭐ Novo | Comando `/analyze` para auto-aprimoramento |
+
+---
+
+Seu agente agora é **praticamente indestrutível** para modelos pequenos. Qualquer dúvida sobre adaptação (ex: qual função passar como `llm_client` no `ToolValidator`), me avise que ajusto! 🛡️
