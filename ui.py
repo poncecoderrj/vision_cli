@@ -125,7 +125,8 @@ class SlashCommandCompleter(Completer):
 
         text_before = document.text_before_cursor
         
-        # Only trigger if '/' is at the very beginning or after whitespace
+        # Simplified regex: match '/' at start or after whitespace
+        # This ensures we catch "/" even with no characters after it
         m = re.search(r"(?:^|\s)/(\w*)$", text_before)
         if m is None:
             return
@@ -142,13 +143,18 @@ class SlashCommandCompleter(Completer):
             ("exit", "Sair"),
         ]
         
-        # Load available skills
-        skills_path = Path("skills")
+        # Load available skills from multiple possible locations
+        skills_paths = [Path("skills"), Path("src/skills")]
         skill_list = []
-        if skills_path.exists():
-            for skill_file in skills_path.glob("*.md"):
-                skill_name = skill_file.stem
-                skill_list.append((skill_name, f"Skill: {skill_name}"))
+        seen_skills = set()
+        
+        for skills_path in skills_paths:
+            if skills_path.exists():
+                for skill_file in skills_path.glob("*.md"):
+                    skill_name = skill_file.stem
+                    if skill_name not in seen_skills:
+                        skill_list.append((skill_name, f"Skill: {skill_name}"))
+                        seen_skills.add(skill_name)
         
         # Combine all options
         all_options = special_commands + skill_list
@@ -179,15 +185,16 @@ class AtMentionCompleter(Completer):
               "dist", "build", ".idea", ".mypy_cache", ".pytest_cache"}
     
     # Common directories to search for files
-    _SEARCH_DIRS = [".", "..", "../..", "src", "docs", "tests"]
+    _SEARCH_DIRS = [".", "src", "docs", "tests", "app", "lib", "packages"]
 
     def get_completions(self, document, complete_event):
         import re, os
         from pathlib import Path as _Path
 
         text_before = document.text_before_cursor
-        # Match @ at start of text or after whitespace
-        m = re.search(r"(?:^|(?<=\s))@(\S*)$", text_before)
+        # Simplified regex: match @ at start of text or after whitespace
+        # This ensures we catch "@" even with no characters after it
+        m = re.search(r"(?:^|\s)@(\S*)$", text_before)
         if m is None:
             return
 
@@ -207,28 +214,51 @@ class AtMentionCompleter(Completer):
             dir_part = ""
             name_frag = norm
 
-        # If base doesn't exist, try searching in common directories
-        if not base.exists() or not base.is_dir():
-            # Try to find matching directories in search paths
-            if not dir_part:
-                # Search in common directories
-                for search_dir in self._SEARCH_DIRS:
-                    search_path = _Path.cwd() / search_dir
-                    if search_path.exists() and search_path.is_dir():
-                        try:
-                            for entry in search_path.iterdir():
-                                if entry.name.startswith(name_frag) and entry.is_dir():
-                                    if entry.name in self._SKIP:
-                                        continue
-                                    rel_path = f"{search_dir}/{entry.name}"
-                                    yield Completion(
-                                        text=rel_path + "/",
-                                        start_position=-len(partial),
-                                        display=entry.name + "/",
-                                        display_meta=f"@{search_dir}/{entry.name}",
-                                    )
-                        except (PermissionError, OSError):
-                            pass
+        # If base doesn't exist or is empty, search in common directories
+        should_search_common = not base.exists() or not base.is_dir() or (not dir_part and not name_frag)
+        
+        if should_search_common:
+            # Search in common directories for any files/dirs
+            for search_dir in self._SEARCH_DIRS:
+                search_path = _Path.cwd() / search_dir
+                if search_path.exists() and search_path.is_dir():
+                    try:
+                        for entry in search_path.iterdir():
+                            if entry.name in self._SKIP:
+                                continue
+                            # Show both files and directories
+                            suffix = "/" if entry.is_dir() else ""
+                            rel_path = f"{search_dir}/{entry.name}{suffix}"
+                            display_name = entry.name + suffix
+                            file_type = "diretório" if entry.is_dir() else "arquivo"
+                            yield Completion(
+                                text=rel_path,
+                                start_position=-len(partial),
+                                display=display_name,
+                                display_meta=f"@{file_type} em {search_dir}",
+                            )
+                    except (PermissionError, OSError):
+                        pass
+            
+            # Also search in root cwd
+            try:
+                for entry in _Path.cwd().iterdir():
+                    if entry.name in self._SKIP:
+                        continue
+                    if entry.name.startswith("_"):
+                        continue
+                    suffix = "/" if entry.is_dir() else ""
+                    display_name = entry.name + suffix
+                    file_type = "diretório" if entry.is_dir() else "arquivo"
+                    yield Completion(
+                        text=entry.name + suffix,
+                        start_position=-len(partial),
+                        display=display_name,
+                        display_meta=f"@{file_type}",
+                    )
+            except (PermissionError, OSError):
+                pass
+            
             return
 
         try:
@@ -311,6 +341,17 @@ def _build_input_app(buf: Buffer) -> Application:
         cycle_mode()
         event.app.invalidate()
 
+    @kb.add("tab")
+    def _(event):
+        """Force trigger completion menu when typing / or @"""
+        text_before = buf.document.text_before_cursor
+        if text_before and (text_before.endswith('/') or text_before.endswith('@')):
+            # Trigger completion explicitly
+            buf.complete()
+        else:
+            # Default tab behavior - insert tab or complete
+            buf.complete()
+
     @kb.add("escape", "enter")  # Alt+Enter → newline
     def _(event):
         buf.insert_text("\n")
@@ -380,9 +421,11 @@ class CombinedCompleter(Completer):
 
 def get_user_input() -> str:
     try:
+        # Remove ThreadedCompleter to avoid race conditions
+        # Use direct CombinedCompleter for more reliable completion
         buf = Buffer(
             multiline=True,
-            completer=ThreadedCompleter(CombinedCompleter()),
+            completer=CombinedCompleter(),
             complete_while_typing=True,
         )
         text = _build_input_app(buf).run()
