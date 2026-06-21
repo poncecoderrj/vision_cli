@@ -33,8 +33,14 @@ class ListDirTool(Tool):
     def execute(self, path: str = ".") -> ToolResult:
         p = _resolve(path)
         if not p.exists():
-            msg = f"Erro: diretório não encontrado: {p}"
-            return ToolResult(success=False, output=msg, error=msg)
+            # Fallback: tenta a partir de %USERPROFILE%
+            userprofile = Path(os.path.expandvars("%USERPROFILE%"))
+            candidate = userprofile / path
+            if candidate.exists() and candidate.is_dir():
+                p = candidate
+            else:
+                msg = f"Erro: diretório não encontrado: {p}"
+                return ToolResult(success=False, output=msg, error=msg)
         if not p.is_dir():
             msg = f"Erro: '{p}' não é um diretório."
             return ToolResult(success=False, output=msg, error=msg)
@@ -74,8 +80,14 @@ class GlobFilesTool(Tool):
     def execute(self, pattern: str, path: str = ".") -> ToolResult:
         base = _resolve(path)
         if not base.exists():
-            msg = f"Erro: diretório base não encontrado: {base}"
-            return ToolResult(success=False, output=msg, error=msg)
+            # Fallback: tenta a partir de %USERPROFILE%
+            userprofile = Path(os.path.expandvars("%USERPROFILE%"))
+            candidate = userprofile / path
+            if candidate.exists():
+                base = candidate
+            else:
+                msg = f"Erro: diretório base não encontrado: {base}"
+                return ToolResult(success=False, output=msg, error=msg)
         try:
             matches = [
                 m for m in base.glob(pattern)

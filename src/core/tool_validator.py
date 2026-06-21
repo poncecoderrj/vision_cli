@@ -20,6 +20,7 @@ class ToolValidator:
         tool_call: Dict[str, Any],
         tools: Dict[str, Tool],
         last_user_message: str = "",
+        session_cwd: str = None,
     ) -> Optional[Dict[str, Any]]:
         """Tenta corrigir argumentos faltantes com heurísticas antes de chamar o LLM."""
         tool_name = tool_call.get("name")
@@ -29,6 +30,7 @@ class ToolValidator:
         tool = tools[tool_name]
         required = tool.parameters.get("required", [])
         args = dict(tool_call.get("arguments") or {})
+        effective_cwd = session_cwd or self.cwd
 
         for arg in required:
             if args.get(arg) not in (None, ""):
@@ -39,7 +41,7 @@ class ToolValidator:
                 if path_match:
                     args["path"] = path_match.group(1)
                 elif tool_name in ("list_dir", "read_file"):
-                    args["path"] = self.cwd
+                    args["path"] = effective_cwd
                 else:
                     return None
 
@@ -62,6 +64,20 @@ class ToolValidator:
                 args["content"] = m.group(1) if m else None
                 if not args["content"]:
                     return None
+
+            elif arg == "url":
+                m = re.search(r'(https?://[^\s]+)', last_user_message)
+                if m:
+                    args["url"] = m.group(1).strip()
+                else:
+                    return None
+
+            elif arg == "command":
+                m = re.search(
+                    r'(?:execute|run|exec|rode|comando)\s+(.+?)(?:$|,|\.)',
+                    last_user_message, re.I
+                )
+                args["command"] = m.group(1).strip() if m else last_user_message
 
             else:
                 return None
@@ -107,10 +123,11 @@ class ToolValidator:
         tools: Dict[str, Tool],
         conversation: List[Dict],
         last_user_message: str = "",
+        session_cwd: str = None,
     ) -> Optional[Dict[str, Any]]:
         """Tenta reparar: heurística → validação → LLM."""
         # 1. Heurística
-        heuristic = self._heuristic_repair(tool_call, tools, last_user_message)
+        heuristic = self._heuristic_repair(tool_call, tools, last_user_message, session_cwd)
         if heuristic:
             try:
                 return self.validate(heuristic, tools)

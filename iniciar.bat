@@ -2,6 +2,12 @@
 chcp 65001 >nul
 title Agente CLI - Vision
 
+:: Salva o diretorio onde o usuario estava antes de qualquer cd
+set "LAUNCH_DIR=%CD%"
+
+:: Muda para a pasta do agente (necessario para .venv e requirements.txt)
+cd /d "%~dp0"
+
 :: Cores e formatacao
 echo.
 echo ============================================
@@ -56,10 +62,11 @@ echo.
 echo ============================================
 echo            INICIANDO AGENTE...
 echo ============================================
+echo [INFO] Diretorio de trabalho: %LAUNCH_DIR%
 echo.
 
-:: Iniciar o projeto
-python main.py
+:: Inicia o agente com o diretorio original do usuario
+python main.py --cwd "%LAUNCH_DIR%"
 
 :: Se o script terminar, manter a janela aberta
 if errorlevel 1 (

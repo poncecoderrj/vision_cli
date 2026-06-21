@@ -97,6 +97,19 @@ PARA BUSCAR ARQUIVOS/PASTAS:
 - search_code(pattern): busca conteúdo dentro dos arquivos
 - list_dir(path): lista o conteúdo de uma pasta específica
 
+⚠️ REGRA CRÍTICA DE BUSCA — LEIA ISSO:
+Quando o usuário pedir para "encontrar", "achar" ou "procurar" uma pasta/arquivo SEM dar o caminho completo:
+- NUNCA busque apenas no cwd (você pode estar na pasta do próprio agente, não na do usuário)
+- SEMPRE use %USERPROFILE% como ponto de partida:
+  · glob_files(pattern="**/projetoX", path="%USERPROFILE%")
+  · list_dir(path="%USERPROFILE%")
+- Se não achar em %USERPROFILE%, tente C:\\ (disco inteiro):
+  · glob_files(pattern="**/projetoX", path="C:\\")
+- Exemplos:
+  · "encontre a pasta visaoX" → glob_files(pattern="**/visaoX", path="%USERPROFILE%")
+  · "onde está meu arquivo config.json" → glob_files(pattern="**/config.json", path="%USERPROFILE%")
+  · "liste os projetos" → list_dir(path="%USERPROFILE%")
+
 ================================================================================
                          🔄 GESTÃO DE SESSÕES INTELIGENTES
 ================================================================================

@@ -16,8 +16,9 @@ class FallbackParser:
 
         # 1. Leitura de arquivo
         for pattern in (
-            r'(?:leia|read|mostre|exiba|cat|abr[ia]r?|open|show me)\s+(?:o\s+)?(?:arquivo|file|conteúdo de)?\s*["\']?([^"\']+)["\']?',
+            r'(?:leia|read|mostre|exiba|cat|abr[ia]r?|open|show me|me mostre|gostaria de ver|dê me|give me)\s+(?:o\s+)?(?:arquivo|file|conteúdo de|content of)?\s*["\']?([^"\']+)["\']?',
             r'(?:conteúdo|content)\s+(?:do|da|de)?\s*["\']?([^"\']+)["\']?',
+            r'(?:o que tem no|what is in)\s+(?:arquivo|file)?\s*["\']?([^"\']+)["\']?',
         ):
             m = re.search(pattern, lower)
             if m:
@@ -33,7 +34,7 @@ class FallbackParser:
             return [{"name": "write_file", "arguments": {"path": m.group(2).strip(), "content": m.group(1).strip()}}]
 
         # 3. Listar diretório
-        if re.search(r'(?:liste|list|ls|dir|mostre arquivos|show files|arquivos em|o que tem em|tree)', lower):
+        if re.search(r'(?:liste|list|ls|dir|mostre arquivos|show files|arquivos em|o que tem em|tree|estrutura|listar|contents of)', lower):
             pm = re.search(r'(?:em|in|de|do|da|no|na|pasta|diretório|directory)\s+["\']?([^"\']+)["\']?', lower)
             path = pm.group(1).strip() if pm else self.cwd
             return [{"name": "list_dir", "arguments": {"path": path}}]
@@ -49,7 +50,7 @@ class FallbackParser:
             return [{"name": "search_code", "arguments": {"query": m.group(1).strip()}}]
 
         # 6. Web search + fetch
-        m = re.search(r'(?:pesquise|web search|busque na web|google|pesquisa na internet)\s+["\']?([^"\']+)["\']?', lower)
+        m = re.search(r'(?:pesquise|web search|busque na web|google|pesquisa na internet|o que é|what is|quem é|who is|pesquisar)\s+["\']?([^"\']+)["\']?', lower)
         if m:
             return [{"name": "web_search_fetch", "arguments": {"query": m.group(1).strip()}}]
 

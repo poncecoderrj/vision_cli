@@ -1,5 +1,37 @@
 from typing import Any, Callable, Dict, List, Optional
 import json
+import re
+
+
+def _rule_based_summary(messages: List[Dict[str, Any]]) -> str:
+    """Sumarização por regras — extrai tool calls e erros sem usar LLM."""
+    events = []
+    for msg in messages:
+        role = msg.get("role", "")
+        content = str(msg.get("content") or "")
+        tool_calls = msg.get("tool_calls", [])
+
+        if role == "user":
+            text = content[:80] + "..." if len(content) > 80 else content
+            events.append(f"Usuário: {text}")
+        elif role == "assistant":
+            if tool_calls:
+                names = [tc.get("function", {}).get("name", tc.get("name", "?")) for tc in tool_calls]
+                events.append(f"Assistente usou: {', '.join(names)}")
+            elif content:
+                first = content.split(".")[0] if "." in content else content[:60]
+                events.append(f"Assistente: {first}")
+        elif role == "tool":
+            lower = content.lower()
+            if "erro" in lower or "error" in lower:
+                m = re.search(r'(?:erro|error)[\s:]+(.+?)(?:\n|$)', content, re.I)
+                snippet = m.group(1)[:80] if m else content[:60]
+                events.append(f"Erro: {snippet}")
+            else:
+                events.append(f"Resultado: OK ({content[:40]}...)" if len(content) > 40 else f"Resultado: {content}")
+
+    return "\n".join(events[-10:]) if events else "Sem eventos registrados."
+
 
 def summarize_with_llm(
     messages: List[Dict[str, Any]],
@@ -35,8 +67,10 @@ def summarize_with_llm(
         )
         text = response.choices[0].message.content or ""
         return text.strip() or "Resumo não disponível."
-    except Exception as e:
-        return generate_session_summary(messages)  # fallback local
+    except Exception:
+        # Tenta resumo por regras primeiro (preserva tool calls); só usa keyword se falhar
+        rule_summary = _rule_based_summary(messages)
+        return rule_summary if rule_summary != "Sem eventos registrados." else generate_session_summary(messages)
 
 
 def generate_session_summary(messages: List[Dict[str, str]]) -> str:

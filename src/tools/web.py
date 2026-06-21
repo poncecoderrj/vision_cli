@@ -4,6 +4,7 @@ Web tools: web_search, fetch_url, search_github.
 
 import os
 import re
+import time
 import html as _html
 from urllib.parse import urlparse, parse_qs
 
@@ -232,6 +233,42 @@ class WebSearchFetchTool(Tool):
         "required": ["query"],
     }
 
+    _USER_AGENTS = [
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    ]
+
+    def __init__(self):
+        self._ua_index = 0
+
+    def _get_next_ua(self) -> str:
+        ua = self._USER_AGENTS[self._ua_index % len(self._USER_AGENTS)]
+        self._ua_index += 1
+        return ua
+
+    def _fetch_with_retry(self, url: str, max_retries: int = 3):
+        """Faz GET com retry exponencial para 429/5xx e timeout."""
+        for attempt in range(max_retries):
+            try:
+                resp = httpx.get(
+                    url,
+                    follow_redirects=True,
+                    timeout=15,
+                    headers={"User-Agent": self._get_next_ua()},
+                )
+                if resp.status_code == 429:
+                    time.sleep(2 ** attempt)
+                    continue
+                if 500 <= resp.status_code < 600:
+                    time.sleep(1)
+                    continue
+                return resp
+            except (httpx.TimeoutException, httpx.ConnectError):
+                time.sleep(1)
+                continue
+        return None
+
     def execute(self, query: str, max_results: int = 3) -> ToolResult:
         max_results = min(int(max_results) if str(max_results).isdigit() else 3, 5)
         results: list[tuple] = []
@@ -250,14 +287,14 @@ class WebSearchFetchTool(Tool):
         for i, (title, url, snippet) in enumerate(results, 1):
             combined += f"### {i}. {title or '(sem título)'}\nFonte: {url}\n\n"
             try:
-                resp = httpx.get(url, follow_redirects=True, timeout=15,
-                                 headers={"User-Agent": _UA})
-                if resp.status_code == 200:
+                resp = self._fetch_with_retry(url)
+                if resp is not None and resp.status_code == 200:
                     text = _html_to_text(resp.text)
                     text = text[:2000] + "..." if len(text) > 2000 else text
                     combined += f"**Conteúdo:**\n{text}\n\n"
                 else:
-                    combined += f"*(status {resp.status_code} — snippet:)*\n{snippet}\n\n"
+                    status = resp.status_code if resp is not None else "timeout"
+                    combined += f"*(status {status} — snippet:)*\n{snippet}\n\n"
             except Exception as e:
                 combined += f"*(Erro ao buscar: {e} — snippet:)*\n{snippet}\n\n"
 
