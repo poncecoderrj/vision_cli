@@ -437,9 +437,12 @@ def run_shell(command: str, stdin_input: str = "", timeout: int = 300) -> str:
     if get_mode() == AgentMode.ACCEPT and not is_whitelisted(command):
         choice = prompt_command_approval(command)
         if isinstance(choice, str):
-            return f"Usuário não aprovou e pediu em vez disso: {choice}"
+            # Usuário deu uma instrução alternativa - isso deve ser tratado como feedback
+            # que requer análise e mudança de estratégia
+            return f"COMANDO_CANCELADO_COM_INSTRUCAO: {choice}"
         if choice == 3 or choice is None:
-            return "User cancelled the execution of this command."
+            # Cancelamento explícito - retornar erro claro para o agente analisar
+            return "ERRO_CRITICO: Usuário cancelou explicitamente a execução deste comando. NÃO repita este comando. Analise o erro e tente uma abordagem completamente diferente."
         if choice == 2:
             add_to_whitelist(command)
             print_system_message("Comando adicionado à whitelist permanentemente.")
