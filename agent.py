@@ -35,6 +35,11 @@ from rich.text import Text
 from rich.markup import escape
 from rich import box
 
+# Importa módulos de contexto e sessão avançada
+from src.core.session_manager import SessionManager
+from src.core.filesystem_context import FileSystemContext
+from src.core.context_summarizer import generate_session_summary, format_context_for_prompt
+
 load_dotenv(override=True)
 
 LM_STUDIO_URL = os.getenv("OPENAI_BASE_URL", "http://localhost:1234/v1")
@@ -44,6 +49,10 @@ client = OpenAI(
     api_key=os.getenv("OPENAI_API_KEY", "lm-studio"),
     base_url=LM_STUDIO_URL,
 )
+
+# Inicializa gerenciadores de contexto
+session_manager = SessionManager()
+fs_context = FileSystemContext()
 
 SYSTEM_PROMPT = """Você é um agente de programação autônomo rodando localmente no PC do usuário. Você TEM acesso real ao sistema de arquivos e ao terminal.
 
@@ -118,6 +127,50 @@ QUANDO UM COMANDO FALHAR (exit code != 0) OU FOR CANCELADO:
 - NUNCA entre em loop repetindo o mesmo comando falho. Se falhou uma vez, mude a abordagem na próxima tentativa.
 - Sempre analise a mensagem de erro antes de tentar novamente.
 - Se o usuário cancelar um comando, NÃO insista no mesmo comando - mude de estratégia ou pergunte.
+- **CONSCIÊNCIA DE LOCALIZAÇÃO**: Antes de criar arquivos/projetos, VERIFIQUE onde você está (use list_dir) e confirme se é o local correto.
+- **BUSCA INTELIGENTE**: Se o usuário pedir para "achar" algo, use search_code ou glob_files ANTES de agir.
+
+================================================================================
+                    📁 CONSCIÊNCIA DE LOCALIZAÇÃO E CONTEXTO
+================================================================================
+
+VOCÊ TEM CONTEXTO DO SISTEMA DE ARQUIVOS:
+- Seu diretório atual (cwd) é onde os comandos serão executados
+- Use list_dir() para ver onde está antes de criar/modificar arquivos
+- Se o usuário disser "crie na área de trabalho", use o caminho completo: %USERPROFILE%\\Desktop
+- Se o usuário disser "ache o arquivo X", use glob_files ou search_code para buscar
+
+PARA NAVEGAR ENTRE PASTAS:
+- Use run_shell("cd caminho") para mudar diretório temporariamente para um comando
+- Ou especifique o caminho completo nas ferramentas de arquivo
+
+PARA BUSCAR ARQUIVOS/PASTAS:
+- glob_files(pattern): busca por padrões como "**/visionsx/**" ou "*.py"
+- search_code(pattern): busca conteúdo dentro dos arquivos
+- list_dir(path): lista o conteúdo de uma pasta específica
+
+================================================================================
+                         🔄 GESTÃO DE SESSÕES INTELIGENTES
+================================================================================
+
+SUAS SESSÕES SÃO SALVAS AUTOMATICAMENTE COM:
+- Histórico completo de mensagens
+- Resumo inteligente das tarefas realizadas
+- Arquivos trabalhados
+- Diretório de trabalho atual
+
+COMANDOS DE SESSÃO DISPONÍVEIS:
+- /sessions lista → mostra todas as sessões salvas
+- /sessions resume <id> → mostra resumo de uma sessão específica
+- /sessions carregar <id> → carrega uma sessão antiga
+- /sessions excluir <id> → remove uma sessão
+
+RESUMO AUTOMÁTICO:
+- A cada interação, um resumo inteligente é gerado identificando:
+  · Tarefas principais solicitadas
+  · Arquivos criados/modificados
+  · Decisões importantes tomadas
+  · Problemas resolvidos
 
 FERRAMENTAS DE ARQUIVO:
 - `read_file(path, offset?, limit?)` → lê um arquivo de texto (offset/limit em linhas)
