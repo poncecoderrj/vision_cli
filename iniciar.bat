@@ -1,18 +1,18 @@
+﻿chcp 65001 >nul
 @echo off
-chcp 65001 >nul
 title Agente CLI - Vision
 
-:: Cores e formatação
+:: Cores e formatacao
 echo.
 echo ============================================
 echo           AGENTE CLI - VISION
 echo ============================================
 echo.
 
-:: Verificar se Python está instalado
+:: Verificar se Python esta instalado
 python --version >nul 2>&1
 if errorlevel 1 (
-    echo [ERRO] Python não encontrado!
+    echo [ERRO] Python nao encontrado!
     echo Instale o Python 3.8+ e tente novamente.
     pause
     exit /b 1
@@ -29,27 +29,27 @@ if not exist ".venv" (
     )
     echo [OK] Ambiente virtual criado com sucesso!
     echo.
-    echo [INFO] Ativando ambiente virtual para instalação...
+    echo [INFO] Ativando ambiente virtual para instalacao...
     call .\.venv\Scripts\activate.bat
 ) else (
-    echo [OK] Ambiente virtual já existe.
+    echo [OK] Ambiente virtual ja existe.
     echo [INFO] Ativando ambiente virtual...
     call .\.venv\Scripts\activate.bat
 )
 
 :: Verificar se requirements.txt existe
 if not exist "requirements.txt" (
-    echo [AVISO] requirements.txt não encontrado!
-    echo Pulando instalação de dependências...
+    echo [AVISO] requirements.txt nao encontrado!
+    echo Pulando instalacao de dependencias...
 ) else (
-    echo [INFO] Verificando/installando dependências...
+    echo [INFO] Verificando/instalando dependencias...
     pip install -r requirements.txt -q
     if errorlevel 1 (
-        echo [ERRO] Falha ao instalar dependências!
+        echo [ERRO] Falha ao instalar dependencias!
         pause
         exit /b 1
     )
-    echo [OK] Dependências verificadas!
+    echo [OK] Dependencias verificadas!
 )
 
 echo.
