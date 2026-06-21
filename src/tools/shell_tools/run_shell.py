@@ -193,6 +193,19 @@ EXEMPLOS DE USO:
         # PowerShell usa New-Item -ItemType Directory -Force para criar múltiplos diretórios
         import re
         
+        # Padrão: mkdir -p ~/Desktop/dir -> New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\Desktop\dir"
+        # Primeiro tratar casos com ~ (til) que não funciona no Windows
+        mkdir_p_tilde_match = re.match(r'^mkdir\s+-p\s+~/(.+)$', command, re.IGNORECASE)
+        if mkdir_p_tilde_match:
+            path = mkdir_p_tilde_match.group(1).strip().replace('/', '\\')
+            return f'New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\\{path}"'
+        
+        # Padrão: mkdir ~/Desktop/dir -> New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\Desktop\dir"
+        mkdir_tilde_match = re.match(r'^mkdir\s+~/(.+)$', command, re.IGNORECASE)
+        if mkdir_tilde_match:
+            path = mkdir_tilde_match.group(1).strip().replace('/', '\\')
+            return f'New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\\{path}"'
+        
         # Padrão: mkdir -p dir1 dir2 dir3 -> New-Item -ItemType Directory -Force -Path "dir1","dir2","dir3"
         mkdir_p_match = re.match(r'^mkdir\s+-p\s+(.+)$', command, re.IGNORECASE)
         if mkdir_p_match:

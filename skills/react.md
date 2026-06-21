@@ -11,6 +11,8 @@
 
 # SKILL: Criador de App React/Vite
 
+⚠️  RODANDO NO WINDOWS - Use comandos Windows!
+
 As configurações já foram coletadas. Execute os passos abaixo em ordem.
 
 ## PASSOS
@@ -26,6 +28,8 @@ Monte o `--template` com base nas configurações:
 
 Comando: `npm create vite@latest {name} -- --template {template}`
 
+⚠️  Se falhar, tente com stdin_input: `run_shell("npm create vite@latest", stdin_input="{name}\n\n{template}\n")`
+
 ### 2. Instalar dependências base
 ```
 cd {name} && npm install
@@ -34,6 +38,8 @@ cd {name} && npm install
 - Se Axios:        `npm install axios`
 - Se Zustand:      `npm install zustand`
 - Se React Query:  `npm install @tanstack/react-query`
+
+⚠️  Se `cd` falhar, use paths absolutos ou tente: `run_shell("npm install", cwd="{name}")`
 
 ### 3. Configurar Tailwind (se Sim)
 ```

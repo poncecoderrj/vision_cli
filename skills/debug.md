@@ -8,6 +8,8 @@
 
 # SKILL: Debug e Correção de Código
 
+⚠️  RODANDO NO WINDOWS - Use comandos Windows!
+
 As configurações já foram coletadas. Execute os passos abaixo em ordem.
 
 ## PASSOS
@@ -30,14 +32,16 @@ search_code("error|Error|exception|Exception")
 search_code("TODO|FIXME|HACK")
 ```
 
-### 3. Reproduzir o erro
+### 3. Reproduzir o erro (Windows)
 ```
-run_shell("python arquivo.py")    (Python)
-run_shell("node src/index.js")    (Node)
-run_shell("pytest -x")            (testes Python)
-run_shell("npm test -- --bail")   (testes JS)
+run_shell("python arquivo.py")           (Python)
+run_shell("node src/index.js")           (Node)
+run_shell("pytest -x")                   (testes Python)
+run_shell("npm test -- --bail")          (testes JS)
 ```
 Leia o stderr completo para entender o stack trace.
+
+⚠️  Se um comando falhar, NÃO repita o mesmo comando! Analise o erro e tente uma abordagem diferente.
 
 ### 4. Analisar e corrigir
 - Leia o arquivo completo antes de qualquer edição
