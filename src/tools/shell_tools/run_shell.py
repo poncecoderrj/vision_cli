@@ -175,6 +175,32 @@ EXEMPLOS DE USO:
         else:
             return ["/bin/bash", "-c"]
     
+    def _normalize_command_for_windows(self, command: str) -> str:
+        """Normaliza comandos Unix para sintaxe Windows quando necessário"""
+        if platform.system() != "Windows":
+            return command
+        
+        # Substituir mkdir -p por mkdir (PowerShell/CMD não suportam -p)
+        # PowerShell usa New-Item -ItemType Directory -Force para criar múltiplos diretórios
+        import re
+        
+        # Padrão: mkdir -p dir1 dir2 dir3 -> New-Item -ItemType Directory -Force -Path "dir1","dir2","dir3"
+        mkdir_p_match = re.match(r'^mkdir\s+-p\s+(.+)$', command, re.IGNORECASE)
+        if mkdir_p_match:
+            dirs = mkdir_p_match.group(1).strip()
+            # Dividir por espaços e converter para formato PowerShell
+            dir_list = '","'.join(dirs.split())
+            return f'New-Item -ItemType Directory -Force -Path "{dir_list}"'
+        
+        # Padrão: mkdir dir1 dir2 (sem -p) -> New-Item -ItemType Directory -Force -Path "dir1","dir2"
+        mkdir_match = re.match(r'^mkdir\s+(.+)$', command, re.IGNORECASE)
+        if mkdir_match:
+            dirs = mkdir_match.group(1).strip()
+            dir_list = '","'.join(dirs.split())
+            return f'New-Item -ItemType Directory -Force -Path "{dir_list}"'
+        
+        return command
+    
     def _is_server_command(self, command: str) -> bool:
         """Detecta se o comando é um servidor/processo em loop"""
         import re
@@ -439,6 +465,9 @@ EXEMPLOS DE USO:
         start_time = time.time()
         shell_cmd = self._get_shell_command(shell)
         working_dir = cwd or os.getcwd()
+        
+        # Normalizar comando para Windows (converte comandos Unix para sintaxe Windows)
+        command = self._normalize_command_for_windows(command)
         
         # Detectar se é comando de servidor
         is_server = self._is_server_command(command)
