@@ -2,6 +2,7 @@
 File system mutation tools: read, write, edit, delete.
 """
 
+import os
 from pathlib import Path
 from .base import Tool, ToolResult
 
@@ -9,7 +10,7 @@ MAX_READ_CHARS = 60_000
 
 
 def _resolve(path: str) -> Path:
-    return Path(path).expanduser().resolve()
+    return Path(os.path.expandvars(path)).expanduser().resolve()
 
 
 def _approval_needed() -> bool:

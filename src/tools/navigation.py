@@ -2,6 +2,7 @@
 Read-only navigation tools: list_dir, glob_files, search_code.
 """
 
+import os
 import re
 from pathlib import Path
 from .base import Tool, ToolResult
@@ -15,7 +16,7 @@ IGNORE_DIRS = {
 
 
 def _resolve(path: str) -> Path:
-    return Path(path).expanduser().resolve()
+    return Path(os.path.expandvars(path)).expanduser().resolve()
 
 
 class ListDirTool(Tool):
