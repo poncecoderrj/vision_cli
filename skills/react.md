@@ -37,11 +37,33 @@ cd {name} && npm install
 
 ### 3. Configurar Tailwind (se Sim)
 ```
+cd {name}
 npm install -D tailwindcss postcss autoprefixer
-npx tailwindcss init -p
 ```
-Editar `tailwind.config.js` → content: `["./index.html","./src/**/*.{js,ts,jsx,tsx}"]`
-Adicionar no topo de `src/index.css`:
+
+**IMPORTANTE PARA WINDOWS:** O comando `npx tailwindcss init -p` pode falhar no Windows. Se falhar, CRIE MANUALMENTE os arquivos:
+
+**tailwind.config.js** (na raiz do projeto):
+```javascript
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
+  theme: { extend: {} },
+  plugins: [],
+}
+```
+
+**postcss.config.js** (na raiz do projeto):
+```javascript
+export default {
+  plugins: {
+    tailwindcss: {},
+    autoprefixer: {},
+  },
+}
+```
+
+Adicionar no topo de `{name}/src/index.css`:
 ```css
 @tailwind base;
 @tailwind components;
@@ -49,19 +71,29 @@ Adicionar no topo de `src/index.css`:
 ```
 
 ### 4. Criar estrutura de pastas
-Use write_file para criar um `.gitkeep` em cada pasta:
+**IMPORTANTE PARA WINDOWS:** Não use `mkdir` diretamente! Use a ferramenta `write_file` para criar arquivos `.gitkeep` dentro das pastas desejadas - isso criará as pastas automaticamente.
+
+Crie um arquivo `.gitkeep` vazio em cada uma destas pastas (use o caminho COMPLETO):
 ```
-src/components/
-src/pages/       (só se router=Sim)
-src/hooks/
-src/services/
-src/assets/
+{name}/src/components/.gitkeep
+{name}/src/pages/.gitkeep       (só se router=Sim)
+{name}/src/hooks/.gitkeep
+{name}/src/services/.gitkeep
+{name}/src/assets/.gitkeep
 ```
 
+Exemplo: Se o projeto se chama "petshop-local", use caminhos como:
+- `petshop-local/src/components/.gitkeep`
+- `petshop-local/src/hooks/.gitkeep`
+
+NUNCA use comandos shell `mkdir` no Windows - sempre use write_file!
+
 ### 5. Limpar boilerplate
-- Substituir `src/App.tsx` (ou `.jsx`) por um componente limpo básico
-- Limpar `src/index.css` (manter só diretivas Tailwind se ativado, ou zerar)
-- Remover `src/App.css`
+- Substituir `{name}/src/App.tsx` (ou `.jsx`) por um componente limpo básico
+- Limpar `{name}/src/index.css` (manter só diretivas Tailwind se ativado, ou zerar)
+- Remover `{name}/src/App.css`
+
+NOTA: Sempre use o caminho completo `{name}/src/...` para evitar criar arquivos no diretório errado!
 
 ### 6. Confirmar e mostrar próximos passos
 Rode: `cd {name} && npm run dev` — confirme que sobe sem erro.

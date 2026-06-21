@@ -116,11 +116,70 @@ class _PlaceholderProcessor(Processor):
         return Transformation(ti.fragments)
 
 
+class SlashCommandCompleter(Completer):
+    """Triggers on '/' at start of input, completes special commands and skills."""
+
+    def get_completions(self, document, complete_event):
+        import re
+        from pathlib import Path
+
+        text_before = document.text_before_cursor
+        
+        # Only trigger if '/' is at the very beginning or after whitespace
+        m = re.search(r"(?:^|\s)/(\w*)$", text_before)
+        if m is None:
+            return
+
+        partial = m.group(1).lower()
+        
+        # Special commands
+        special_commands = [
+            ("resume", "Continuar sessão anterior"),
+            ("config", "Ver/editar configurações"),
+            ("skills", "Listar skills disponíveis"),
+            ("help", "Ajuda"),
+            ("clear", "Limpar tela"),
+            ("exit", "Sair"),
+        ]
+        
+        # Load available skills
+        skills_path = Path("skills")
+        skill_list = []
+        if skills_path.exists():
+            for skill_file in skills_path.glob("*.md"):
+                skill_name = skill_file.stem
+                skill_list.append((skill_name, f"Skill: {skill_name}"))
+        
+        # Combine all options
+        all_options = special_commands + skill_list
+        
+        count = 0
+        for name, description in all_options:
+            if count >= 50:
+                break
+            if not name.lower().startswith(partial):
+                continue
+            
+            insert = name
+            display_name = f"/{name}"
+            
+            yield Completion(
+                text=insert,
+                start_position=-len(partial),
+                display=display_name,
+                display_meta=description,
+            )
+            count += 1
+
+
 class AtMentionCompleter(Completer):
-    """Triggers on '@' in the input buffer, completes file/dir paths from cwd."""
+    """Triggers on '@' in the input buffer, completes file/dir paths from cwd or common locations."""
 
     _SKIP = {"__pycache__", "node_modules", ".git", ".venv", "venv",
               "dist", "build", ".idea", ".mypy_cache", ".pytest_cache"}
+    
+    # Common directories to search for files
+    _SEARCH_DIRS = [".", "..", "../..", "src", "docs", "tests"]
 
     def get_completions(self, document, complete_event):
         import re, os
@@ -148,7 +207,28 @@ class AtMentionCompleter(Completer):
             dir_part = ""
             name_frag = norm
 
+        # If base doesn't exist, try searching in common directories
         if not base.exists() or not base.is_dir():
+            # Try to find matching directories in search paths
+            if not dir_part:
+                # Search in common directories
+                for search_dir in self._SEARCH_DIRS:
+                    search_path = _Path.cwd() / search_dir
+                    if search_path.exists() and search_path.is_dir():
+                        try:
+                            for entry in search_path.iterdir():
+                                if entry.name.startswith(name_frag) and entry.is_dir():
+                                    if entry.name in self._SKIP:
+                                        continue
+                                    rel_path = f"{search_dir}/{entry.name}"
+                                    yield Completion(
+                                        text=rel_path + "/",
+                                        start_position=-len(partial),
+                                        display=entry.name + "/",
+                                        display_meta=f"@{search_dir}/{entry.name}",
+                                    )
+                        except (PermissionError, OSError):
+                            pass
             return
 
         try:
@@ -281,11 +361,28 @@ def _fallback_prompt() -> str:
     return _fallback_session.prompt(HTML(f"<b>> </b>"))
 
 
+class CombinedCompleter(Completer):
+    """Combines SlashCommandCompleter and AtMentionCompleter."""
+    
+    def __init__(self):
+        self.slash_completer = SlashCommandCompleter()
+        self.at_completer = AtMentionCompleter()
+    
+    def get_completions(self, document, complete_event):
+        # Try slash completer first
+        for completion in self.slash_completer.get_completions(document, complete_event):
+            yield completion
+        
+        # Try @ completer
+        for completion in self.at_completer.get_completions(document, complete_event):
+            yield completion
+
+
 def get_user_input() -> str:
     try:
         buf = Buffer(
             multiline=True,
-            completer=ThreadedCompleter(AtMentionCompleter()),
+            completer=ThreadedCompleter(CombinedCompleter()),
             complete_while_typing=True,
         )
         text = _build_input_app(buf).run()
@@ -400,9 +497,24 @@ def _simple_prompt(message_html: str) -> str:
     return _fallback_session.prompt(HTML(message_html)).strip()
 
 
+# Variável global para armazenar a instância atual de captura
+_current_capture = None
+
+def set_current_capture(capture):
+    """Define a instância de captura atual para acesso global."""
+    global _current_capture
+    _current_capture = capture
+
 def _key_prompt(valid_keys: list, cancel_key: str = "") -> str:
     """Single-keypress prompt — no Enter needed. Returns the pressed key immediately."""
     _cancel = cancel_key or valid_keys[-1]
+    
+    # Pausa captura do input_queue para evitar conflito com msvcrt/prompt_toolkit
+    _capture_paused = False
+    if _current_capture is not None and hasattr(_current_capture, '_active') and _current_capture._active:
+        _current_capture.stop()
+        _capture_paused = True
+    
     kb = KeyBindings()
 
     for key in valid_keys:
@@ -427,8 +539,15 @@ def _key_prompt(valid_keys: list, cancel_key: str = "") -> str:
     )
     try:
         result = app.run()
+        # Pequeno delay para garantir que o terminal esteja pronto após o prompt
+        time.sleep(0.05)
+        # Retoma captura se estava pausada
+        if _capture_paused and _current_capture is not None:
+            _current_capture.start()
         return result if result else _cancel
     except (KeyboardInterrupt, EOFError):
+        if _capture_paused and _current_capture is not None:
+            _current_capture.start()
         return _cancel
 
 
@@ -667,11 +786,13 @@ class AgentStream:
         self._live.start()
         if self._input_capture is not None:
             self._input_capture.start()
+            set_current_capture(self._input_capture)
         return self
 
     def __exit__(self, *args):
         if self._input_capture is not None:
             self._input_capture.stop()
+            set_current_capture(None)
         self._collapse_reasoning()
         self._live.stop()
         if self._reasoning.strip():
