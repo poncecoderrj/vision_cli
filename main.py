@@ -12,7 +12,8 @@ load_dotenv(override=True)
 
 from agent import run_agent_loop
 
-if __name__ == "__main__":
+
+def main():
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--cwd", default=None)
     args, _ = parser.parse_known_args()
@@ -24,3 +25,7 @@ if __name__ == "__main__":
         run_agent_loop()
     except KeyboardInterrupt:
         pass
+
+
+if __name__ == "__main__":
+    main()
