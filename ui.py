@@ -492,13 +492,24 @@ def print_tool_result(tool_name: str, fn_args: dict, result: str, duration: floa
     header.append(f"({arg_str})", style=MUTED)
     console.print(_bullet_block("⏺", f"bold {GREEN}", header))
 
-    preview = result.strip().split("\n")
-    first = preview[0][:90] if preview else ""
-    extra = f"  [+{len(preview) - 1} linhas]" if len(preview) > 1 else ""
-    console.print(
-        f"  [{GREEN}]⎿[/{GREEN}]  [{MUTED}]{escape(first)}{escape(extra)}[/{MUTED}]"
-        f"  [{DIMC}]({duration:.1f}s)[/{DIMC}]"
-    )
+    # Detectar se é resultado de erro
+    is_error = result.strip().startswith("Erro:") or result.strip().startswith("Error:")
+
+    if is_error:
+        # Mostrar erro em destaque
+        preview_lines = result.strip().split("\n")
+        for line in preview_lines[:5]:  # Mostrar até 5 linhas de erro
+            console.print(f"  [{GREEN}]⎿[/{GREEN}]  [red]{escape(line)}[/red]")
+        if len(preview_lines) > 5:
+            console.print(f"  [{GREEN}]⎿[/{GREEN}]  [{MUTED}][+{len(preview_lines) - 5} linhas...][/{MUTED}]")
+    else:
+        preview = result.strip().split("\n")
+        first = preview[0][:90] if preview else ""
+        extra = f"  [+{len(preview) - 1} linhas]" if len(preview) > 1 else ""
+        console.print(
+            f"  [{GREEN}]⎿[/{GREEN}]  [{MUTED}]{escape(first)}{escape(extra)}[/{MUTED}]"
+            f"  [{DIMC}]({duration:.1f}s)[/{DIMC}]"
+        )
     console.print()
 
 

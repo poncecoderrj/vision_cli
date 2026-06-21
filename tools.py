@@ -371,6 +371,13 @@ def edit_file(path: str, old_string: str, new_string: str, replace_all: bool = F
     p = _resolve(path)
     if not p.exists():
         return f"Erro: arquivo não encontrado: {p}"
+    
+    # Validar argumentos obrigatórios
+    if not old_string:
+        return "Erro: old_string é obrigatório e não pode ser vazio."
+    if not new_string:
+        return "Erro: new_string é obrigatório e não pode ser vazio."
+    
     try:
         text = p.read_text(encoding="utf-8")
     except Exception as e:

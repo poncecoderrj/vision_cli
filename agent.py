@@ -1,6 +1,7 @@
 import os
 import json
 import time
+import inspect
 from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -534,7 +535,11 @@ def _handle_slash_command(cmd: str, rest: str, messages: list) -> "tuple[bool, s
 
 
 def _execute_tool(tc: dict) -> str:
-    """Execute a single tool call and return its string result."""
+    """Execute a single tool call with generic argument validation.
+    
+    Uses inspect.signature to validate required arguments for ALL tools,
+    not just edit_file. Catches all exceptions for better error reporting.
+    """
     fn_name = tc["name"]
     try:
         fn_args = json.loads(tc["arguments"]) if tc["arguments"].strip() else {}
@@ -545,9 +550,37 @@ def _execute_tool(tc: dict) -> str:
     if fn is None:
         return f"Tool '{fn_name}' não encontrada."
 
+    # Validação genérica via inspect.signature para TODAS as tools
+    try:
+        sig = inspect.signature(fn)
+        required_args = []
+        for param_name, param in sig.parameters.items():
+            # Parâmetro é obrigatório se não tem default e não é *args/**kwargs
+            if (param.default == inspect.Parameter.empty and 
+                param.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)):
+                required_args.append(param_name)
+        
+        # Verificar argumentos faltando ou vazios
+        missing = [arg for arg in required_args if arg not in fn_args or fn_args[arg] == ""]
+        if missing:
+            return f"Erro: {fn_name} requer argumentos: {', '.join(required_args)}. Faltando: {', '.join(missing)}"
+    except Exception as e:
+        # Se não conseguir inspecionar, continua sem validação (fallback)
+        print_system_message(f"Aviso: não foi possível validar argumentos de {fn_name}: {e}")
+
     track_tool_call()
     t0 = time.perf_counter()
-    result = fn(**fn_args)
+    try:
+        result = fn(**fn_args)
+    except TypeError as e:
+        error_msg = f"Erro de argumentos em {fn_name}: {e}"
+        print_error(error_msg)
+        return error_msg
+    except Exception as e:
+        error_msg = f"Erro ao executar {fn_name}: {type(e).__name__}: {e}"
+        print_error(error_msg)
+        return error_msg
+    
     duration = time.perf_counter() - t0
     print_tool_result(fn_name, fn_args, str(result), duration)
     return str(result)
