@@ -1,34 +1,82 @@
 # Compiled Python files
 *.pyc
+*.pyo
+*.pyd
 __pycache__/
+*.egg-info/
+*.egg
+dist/
+build/
 
 # Dependencies
 .venv/
 venv/
+env/
+ENV/
 node_modules/
+.pnp
+.pnp.js
 
 # Logs and temporary files
 *.log
 *.tmp
+logs/
 
 # Sessions / cache local
 .visions/
 .claude/
-logs/
 
 # Environment / credentials
 .env
 .env.*
+!.env.example
 
 # Editors
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# IDE
+*.iml
+.gradle
+.classpath
+.project
+.settings/
 
 # Coverage reports
 .coverage
 coverage/
 htmlcov/
+.coverage.*
 
 # Python cache
 .mypy_cache/
 .pytest_cache/
+.dmypy.json
+dmypy.json
+
+# Testing
+.tox/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# Build outputs
+dist/
+build/
+*.whl
+
+# Node/Vite
+dist/
+.next/
+out/
+.turbo
