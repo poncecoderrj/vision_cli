@@ -1,0 +1,26 @@
+[
+  {
+    "id": 1,
+    "name": "Rosquinha de Chocolate",
+    "price": 3.50,
+    "description": "Uma rosquinha clássica, perfeita para qualquer hora."
+  },
+  {
+    "id": 2,
+    "name": "Rosquinha de Baunilha",
+    "price": 3.25,
+    "description": "Suave e aromática, um toque de baunilha pura."
+  },
+  {
+    "id": 3,
+    "name": "Rosquinha de Limão",
+    "price": 3.75,
+    "description": "Refrescante e cítrica, ideal para dias quentes."
+  },
+  {
+    "id": 4,
+    "name": "Rosquinha Gourmet",
+    "price": 4.50,
+    "description": "Ingredientes selecionados, uma experiência premium."
+  }
+]
